@@ -15,7 +15,7 @@ fn main() -> std::io::Result<()> {
 
 fn process_stream(stream: Result<TcpStream, Error>) {
     let mut stream = stream.unwrap();
-    let mut buffer = [0; 0124];
+    let mut buffer = [0; 1204];
 
     match stream.read(&mut buffer) {
         Ok(_) => {
