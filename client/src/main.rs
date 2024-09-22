@@ -39,7 +39,7 @@ fn receive_response(stream: &mut TcpStream) -> io::Result<()> {
         }
         Ok(n) => {
             let response = String::from_utf8_lossy(&buffer[..n]);
-            println!("Server response: {}", response);
+            println!("Server response:\n{}", response);
         }
         Err(e) => {
             println!("Failed to read from stream: {}", e);
