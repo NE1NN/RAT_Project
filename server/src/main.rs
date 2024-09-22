@@ -9,8 +9,8 @@ fn main() -> std::io::Result<()> {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(_) => {
-                if let Err(e) = execute_command() {
+            Ok(stream) => {
+                if let Err(e) = process_stream(stream) {
                     eprintln!("Failed to process {}", e)
                 }
             }
@@ -23,17 +23,24 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn process_stream(stream: Result<TcpStream, Error>) -> io::Result<()> {
-    let mut stream = stream?;
+fn process_stream(mut stream: TcpStream) -> io::Result<()> {
     let mut buffer = [0; 1204];
 
-    match stream.read(&mut buffer) {
-        Ok(_) => {
-            let message = String::from_utf8_lossy(&buffer[..]);
-            println!("Received: {}", message)
-        }
-        Err(e) => {
-            println!("Failed to read from stream: {}", e);
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                // Connection closed by client
+                println!("Client disconnected.");
+                break;
+            }
+            Ok(n) => {
+                // Print the message received from the client
+                let message = String::from_utf8_lossy(&buffer[..n]);
+                println!("Received: {}", message);
+            }
+            Err(e) => {
+                println!("Failed to read from stream: {}", e);
+            }
         }
     }
     Ok(())
