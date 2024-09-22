@@ -90,7 +90,12 @@ fn execute_command(message: &str) -> io::Result<String> {
             let stderr = String::from_utf8_lossy(&output.stderr);
 
             // Return stdout if the command was successful, otherwise return stderr
-            if output.status.success() {
+            if stdout.is_empty() && stderr.is_empty() {
+                Ok(format!(
+                    "Command '{}' executed successfully.\n",
+                    command
+                ))
+            } else if !stdout.is_empty() {
                 Ok(stdout.to_string())
             } else {
                 Ok(stderr.to_string())
