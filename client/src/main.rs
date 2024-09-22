@@ -10,8 +10,6 @@ fn main() -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
 
-    let mut buffer = [0; 1024];
-
     loop {
         // Read user input
         let mut input = String::new();
@@ -19,21 +17,32 @@ fn main() -> io::Result<()> {
         io::stdout().flush()?;
         reader.read_line(&mut input)?;
 
-        stream.write_all(input.as_bytes())?;
+        send_message(&mut stream, &input)?;
 
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                // Connection closed by server
-                println!("Server disconnected.");
-                break;
-            }
-            Ok(n) => {
-                let message = String::from_utf8_lossy(&buffer[..n]);
-                println!("Server response: {}", message);
-            }
-            Err(e) => {
-                println!("Failed to read from stream: {}", e);
-            }
+        receive_response(&mut stream)?;
+    }
+}
+
+fn send_message(stream: &mut TcpStream, message: &str) -> io::Result<()> {
+    stream.write_all(message.as_bytes())?;
+    stream.flush()?;
+    Ok(())
+}
+
+fn receive_response(stream: &mut TcpStream) -> io::Result<()> {
+    let mut buffer = [0; 1024];
+    
+    match stream.read(&mut buffer) {
+        Ok(0) => {
+            println!("Server disconnected.");
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Server disconnected"));
+        }
+        Ok(n) => {
+            let response = String::from_utf8_lossy(&buffer[..n]);
+            println!("Server response: {}", response);
+        }
+        Err(e) => {
+            println!("Failed to read from stream: {}", e);
         }
     }
     Ok(())
