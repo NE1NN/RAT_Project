@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Error, Read, Write},
+    io::{self, Read, Write},
     net::{TcpListener, TcpStream},
     process::Command,
 };
