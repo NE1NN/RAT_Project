@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Error, Read},
+    io::{self, Error, Read, Write},
     net::{TcpListener, TcpStream},
     process::Command,
 };
@@ -34,9 +34,11 @@ fn process_stream(mut stream: TcpStream) -> io::Result<()> {
                 break;
             }
             Ok(n) => {
-                // Print the message received from the client
                 let message = String::from_utf8_lossy(&buffer[..n]);
-                println!("Received: {}", message);
+                let response = execute_command(&message)?;
+
+                stream.write_all(response.as_bytes())?;
+                stream.flush()?;
             }
             Err(e) => {
                 println!("Failed to read from stream: {}", e);
@@ -46,16 +48,20 @@ fn process_stream(mut stream: TcpStream) -> io::Result<()> {
     Ok(())
 }
 
-fn execute_command() -> io::Result<()> {
-    let output = if cfg!(target_os = "windows") {
-        Command::new("cmd").args(&["/C", "dir"]).output()?
-    } else {
-        Command::new("ls").output()?
-    };
+fn execute_command(message: &str) -> io::Result<String> {
+    if message.trim() == "ls" {
+        let output = if cfg!(target_os = "windows") {
+            Command::new("cmd").args(&["/C", "dir"]).output()?
+        } else {
+            Command::new("ls").output()?
+        };
+        println!(
+            "Command output: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
-    println!(
-        "Command output: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    Ok(())
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    }
+
+    return Ok(format!("Unknown command: {}\n", message.trim()));
 }
