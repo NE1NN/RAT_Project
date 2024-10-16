@@ -227,6 +227,6 @@ fn append_to_log(data: &str) -> io::Result<()> {
         .create(true)
         .open(file_name)?;
 
-    file.write_all(format!("{} - {}\n", timestamp, data).as_bytes())?;
+    file.write_all(format!("{}:\n{}\n", timestamp, data).as_bytes())?;
     Ok(())
 }
