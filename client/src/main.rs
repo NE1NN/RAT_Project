@@ -15,7 +15,7 @@ fn main() -> io::Result<()> {
     loop {
         // Read user input
         let mut input = String::new();
-        print!("Enter message: ");
+        print!("Enter command: ");
         io::stdout().flush()?;
         reader.read_line(&mut input)?;
         let trimmed_input = input.trim();
@@ -58,7 +58,7 @@ fn receive_response(stream: &mut TcpStream) -> io::Result<()> {
         }
         Ok(n) => {
             let response = String::from_utf8_lossy(&buffer[..n]);
-            println!("Server response:\n{}", response);
+            println!("\nResponse:\n{}", response);
         }
         Err(e) => {
             println!("Failed to read from stream: {}", e);
