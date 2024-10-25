@@ -5,12 +5,7 @@ use std::{
     net::TcpStream,
 };
 use std::fs;
-use std::fs::OpenOptions;
-use std::sync::{Arc, Mutex};
-use std::thread;
 use zip::{write::SimpleFileOptions, ZipWriter};
-
-
 
 pub fn receive_file(stream: &mut TcpStream, filename: &str) -> io::Result<()> {
     let path = Path::new(filename);
