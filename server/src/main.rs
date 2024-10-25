@@ -154,12 +154,20 @@ fn execute_command(message: &str) -> io::Result<String> {
                 Err(e) => Ok(format!("Failed to change directory: {}\n", e)),
             }
         } else {
-            // Collect the arguments after the command
-            let args: Vec<&str> = parts.collect();
+            #[cfg(target_os = "windows")]
+            let shell = "cmd";
+            #[cfg(target_os = "windows")]
+            let arg_flag = "/C";
 
-            // Use Command to run the specified command
-            let output = Command::new(command)
-                .args(&args)
+            #[cfg(not(target_os = "windows"))]
+            let shell = "sh";
+            #[cfg(not(target_os = "windows"))]
+            let arg_flag = "-c";
+
+            // Run the command within the shell
+            let output = Command::new(shell)
+                .arg(arg_flag)
+                .arg(trimmed_message)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .output()?;
@@ -168,13 +176,15 @@ fn execute_command(message: &str) -> io::Result<String> {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
 
-            // Return stdout if the command was successful, otherwise return stderr
-            if stdout.is_empty() && stderr.is_empty() {
-                Ok(format!("Command '{}' executed successfully.\n", command))
-            } else if !stdout.is_empty() {
+            if !stdout.is_empty() {
                 Ok(stdout.to_string())
-            } else {
+            } else if !stderr.is_empty() {
                 Ok(stderr.to_string())
+            } else {
+                Ok(format!(
+                    "Command '{}' executed successfully with no output.\n",
+                    message
+                ))
             }
         }
     } else {
