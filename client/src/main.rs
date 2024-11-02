@@ -6,7 +6,22 @@ use std::path::Path;
 fn main() -> io::Result<()> {
     println!("Welcome to RAT");
 
-    let mut stream = TcpStream::connect("127.0.0.1:8080")?;
+    // Prompt for IP address and port
+    let ip_address =
+        read_user_input("Enter the IP address to connect to (or type 'default' for localhost): ")?;
+    let port = read_user_input("Enter the port to connect on (or type 'default' for 8080): ")?;
+
+    // Determine address based on user input
+    let address = match (ip_address.trim(), port.trim()) {
+        ("default", "default") => "127.0.0.1:8080".to_string(),
+        ("default", port) => format!("127.0.0.1:{}", port),
+        (ip, "default") => format!("{}:8080", ip),
+        (ip, port) => format!("{}:{}", ip, port),
+    };
+
+    // Attempt to connect
+    let mut stream = TcpStream::connect(&address)?;
+    println!("Connected to {} successfully!", address);
 
     loop {
         // Prompt and read user input
